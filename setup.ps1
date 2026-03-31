@@ -170,26 +170,12 @@ function Download-GgufModel($Size) {
         Write-Host "[OK] GGUF $Size already present." -ForegroundColor Green
         return
     }
-    # ┌── TOKEN SECTION — remove this block once models are public ──┐
-    if (-not $env:PRISM_HF_TOKEN) {
-        Write-Host ""
-        Write-Host "  Models are on private HuggingFace repos (will be made public later)." -ForegroundColor Yellow
-        Write-Host "  You need a read-only HF token -- ask the team or create one at:" -ForegroundColor Yellow
-        Write-Host "    https://huggingface.co/settings/tokens" -ForegroundColor Yellow
-        Write-Host ""
-        $env:PRISM_HF_TOKEN = Read-Host "  Paste your HuggingFace token (or press Enter to skip)"
-    }
-    if (-not $env:PRISM_HF_TOKEN) {
-        Write-Host "[WARN] Skipping model download (no token)." -ForegroundColor Yellow
-        return
-    }
-    # └── END TOKEN SECTION ─────────────────────────────────────────┘
     $HfCli = Join-Path $VenvDir "Scripts\huggingface-cli.exe"
     if (-not (Test-Path $HfCli)) {
         $HfCli = Join-Path $VenvDir "Scripts\hf.exe"
     }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    & $HfCli download $repo --local-dir $dir --token $env:PRISM_HF_TOKEN
+    & $HfCli download $repo --local-dir $dir
     Write-Host "[OK] GGUF $Size downloaded." -ForegroundColor Green
 }
 

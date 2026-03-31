@@ -3,9 +3,8 @@
 # Installs all dependencies, downloads models and binaries.
 #
 # Usage:
-#   ./setup.sh                      (interactive)
-#   curl -fsSL <raw-url> | sh       (piped — prompts read from /dev/tty)
-#   PRISM_HF_TOKEN=hf_xxx ./setup.sh      (non-interactive token)
+#   ./setup.sh                      (downloads 8B model by default)
+#   BONSAI_MODEL=4B ./setup.sh      (download a different model size)
 set -e
 
 # ── Resolve paths ──
@@ -116,33 +115,6 @@ echo "   Model: ${BONSAI_MODEL}"
 echo "========================================="
 echo ""
 
-# ┌──────────────────────────────────────────────────────────────────┐
-# │ TOKEN SECTION — remove this block once models are public        │
-# ┌──────────────────────────────────────────────────────────────────┘
-TOKEN_FILE="$SCRIPT_DIR/.prism_hf_token"
-
-if [ -z "$PRISM_HF_TOKEN" ] && [ -f "$TOKEN_FILE" ]; then
-    PRISM_HF_TOKEN="$(cat "$TOKEN_FILE")"
-fi
-
-if [ -z "$PRISM_HF_TOKEN" ]; then
-    echo "  Models are hosted on private HuggingFace repos."
-    echo "  You need a read-only HF token (ask the team, or create one at"
-    echo "  https://huggingface.co/settings/tokens)."
-    echo ""
-    printf "  Paste your PRISM_HF_TOKEN (or press Enter to skip model download): "
-    if [ -r /dev/tty ]; then read -r PRISM_HF_TOKEN </dev/tty; else read -r PRISM_HF_TOKEN; fi
-    echo ""
-fi
-
-if [ -n "$PRISM_HF_TOKEN" ]; then
-    printf '%s' "$PRISM_HF_TOKEN" > "$TOKEN_FILE"
-    chmod 600 "$TOKEN_FILE"
-fi
-export PRISM_HF_TOKEN
-# └──────────────────────────────────────────────────────────────────┐
-# │ END TOKEN SECTION                                               │
-# └──────────────────────────────────────────────────────────────────┘
 
 # ────────────────────────────────────────────────────
 #  2. Detect platform

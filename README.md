@@ -53,9 +53,6 @@ cd Bonsai-demo
 # (Optional) Choose a model size: 8B (default), 4B, or 1.7B
 export BONSAI_MODEL=8B
 
-# Set your HuggingFace token (required while repos are private)
-export PRISM_HF_TOKEN="hf_your_token_here"
-
 # One command does everything: installs deps, downloads models + binaries
 ./setup.sh
 ```
@@ -68,9 +65,6 @@ cd Bonsai-demo
 
 # (Optional) Choose a model size: 8B (default), 4B, or 1.7B
 $env:BONSAI_MODEL = "8B"
-
-# Set your HuggingFace token (required while repos are private)
-$env:PRISM_HF_TOKEN = "hf_your_token_here"
 
 # Run setup
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
