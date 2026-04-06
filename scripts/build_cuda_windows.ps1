@@ -107,7 +107,28 @@ cmake -B $BuildDir `
 
 # ── Build ──
 $nproc = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-cmake --build $BuildDir --config Release -j $nproc
+$buildJobs = $nproc
+
+# Detect GPU VRAM; use fewer jobs on low-VRAM machines to avoid OOM during CUDA compilation
+try {
+    $adapters = Get-CimInstance Win32_VideoController -ErrorAction Stop
+    $maxVramBytes = ($adapters | ForEach-Object { [long]$_.AdapterRAM } | Measure-Object -Maximum).Maximum
+    if ($maxVramBytes -gt 0) {
+        $maxVramGB = [math]::Round($maxVramBytes / 1GB, 1)
+        if ($maxVramGB -lt 16) {
+            $buildJobs = 2
+            Write-Host "  Detected GPU VRAM: ${maxVramGB} GB (< 16 GB) -- limiting CUDA build to -j $buildJobs" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Detected GPU VRAM: ${maxVramGB} GB -- using -j $buildJobs (logical CPU count)"
+        }
+    } else {
+        Write-Host "  GPU VRAM detection returned 0 or empty -- using -j $buildJobs (logical CPU count)" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "  GPU VRAM detection failed ($($_.Exception.Message)) -- using -j $buildJobs (logical CPU count)" -ForegroundColor Yellow
+}
+
+cmake --build $BuildDir --config Release -j $buildJobs
 
 Pop-Location
 
