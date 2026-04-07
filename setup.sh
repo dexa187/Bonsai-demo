@@ -238,7 +238,7 @@ fi
 #  7. llama.cpp pre-built binaries
 # ────────────────────────────────────────────────────
 _has_binaries=false
-for _d in bin/mac bin/cuda; do
+for _d in bin/mac bin/cuda bin/rocm; do
     ls "$_d"/llama-* >/dev/null 2>&1 && _has_binaries=true && break
 done
 
