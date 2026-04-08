@@ -1,12 +1,14 @@
 #!/bin/sh
 # Download pre-built llama.cpp binaries from GitHub Release.
-# Auto-detects OS and CUDA version.
+# Auto-detects OS and GPU (NVIDIA CUDA vs AMD ROCm on Linux).
 #
 # Usage:  ./scripts/download_binaries.sh
 #
-# Linux + no detected CUDA: interactive prompt when stdin/stdout are TTYs;
-# otherwise defaults to CUDA 12.8 (Docker/CI). Override with:
-#   BONSAI_CUDA_TAG=12.4|12.8|13.1
+# Linux overrides (no GPU detected / CI / Docker):
+#   BONSAI_CUDA_TAG=12.4|12.8|13.1  — force a CUDA tarball into bin/cuda
+#   BONSAI_LINUX_GPU=rocm          — force ROCm tarball into bin/rocm
+# Non-interactive default when stdin/stdout are not both TTYs: CUDA 12.8.
+
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEMO_DIR="$(resolve_demo_dir)"
 cd "$DEMO_DIR"
 
-RELEASE_TAG="prism-b8196-f5dda72"
+RELEASE_TAG="prism-b8201-ba7e817"
 BASE_URL="https://github.com/PrismML-Eng/llama.cpp/releases/download/$RELEASE_TAG"
 
 OS="$(uname -s)"
@@ -25,8 +27,10 @@ case "$OS" in
         DEST="bin/mac"
         ;;
     Linux)
-        # Detect CUDA version
+        # ── Detect GPU: NVIDIA (CUDA) or AMD (ROCm) ──
+        _gpu_type=""
         _cuda_ver=""
+
         if command -v nvcc >/dev/null 2>&1; then
             _cuda_ver=$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p')
         elif command -v nvidia-smi >/dev/null 2>&1; then
@@ -34,6 +38,12 @@ case "$OS" in
         fi
 
         if [ -n "$_cuda_ver" ]; then
+            _gpu_type="cuda"
+        elif command -v rocminfo >/dev/null 2>&1 || command -v rocm-smi >/dev/null 2>&1 || command -v hipcc >/dev/null 2>&1; then
+            _gpu_type="rocm"
+        fi
+
+        if [ "$_gpu_type" = "cuda" ]; then
             _major="${_cuda_ver%%.*}"
             _minor="${_cuda_ver#*.}"
             if [ "$_major" -ge 13 ]; then
@@ -44,6 +54,16 @@ case "$OS" in
                 _cuda_tag="12.4"
             fi
             info "Detected CUDA $_cuda_ver → using build for CUDA $_cuda_tag"
+            ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-${_cuda_tag}-x64.tar.gz"
+            DEST="bin/cuda"
+        elif [ "$_gpu_type" = "rocm" ]; then
+            info "Detected AMD ROCm → using ROCm 7.2 build"
+            ASSET="llama-${RELEASE_TAG}-bin-linux-rocm-7.2-x64.tar.gz"
+            DEST="bin/rocm"
+        elif [ "${BONSAI_LINUX_GPU:-}" = "rocm" ]; then
+            info "Using ROCm bundle (BONSAI_LINUX_GPU=rocm)"
+            ASSET="llama-${RELEASE_TAG}-bin-linux-rocm-7.2-x64.tar.gz"
+            DEST="bin/rocm"
         elif [ -n "${BONSAI_CUDA_TAG:-}" ]; then
             case "$BONSAI_CUDA_TAG" in
                 12.4|12.8|13.1) _cuda_tag="$BONSAI_CUDA_TAG" ;;
@@ -52,26 +72,28 @@ case "$OS" in
                     exit 1 ;;
             esac
             info "Using CUDA $_cuda_tag (BONSAI_CUDA_TAG)"
+            ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-${_cuda_tag}-x64.tar.gz"
+            DEST="bin/cuda"
         elif [ -t 0 ] && [ -t 1 ]; then
             echo ""
-            echo "  Available CUDA builds:"
-            echo "    1) CUDA 12.4"
-            echo "    2) CUDA 12.8"
-            echo "    3) CUDA 13.1"
-            printf "  Choose [1-3, default=2]: "
+            echo "  No GPU auto-detected. Available builds:"
+            echo "    1) CUDA 12.4  (NVIDIA)"
+            echo "    2) CUDA 12.8  (NVIDIA)"
+            echo "    3) CUDA 13.1  (NVIDIA)"
+            echo "    4) ROCm 7.2   (AMD)"
+            printf "  Choose [1-4, default=2]: "
             read -r _choice
             case "$_choice" in
-                1) _cuda_tag="12.4" ;;
-                3) _cuda_tag="13.1" ;;
-                *) _cuda_tag="12.8" ;;
+                1) ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-12.4-x64.tar.gz"; DEST="bin/cuda" ;;
+                3) ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-13.1-x64.tar.gz"; DEST="bin/cuda" ;;
+                4) ASSET="llama-${RELEASE_TAG}-bin-linux-rocm-7.2-x64.tar.gz"; DEST="bin/rocm" ;;
+                *) ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-12.8-x64.tar.gz"; DEST="bin/cuda" ;;
             esac
         else
-            _cuda_tag="12.8"
-            info "Non-interactive environment — using CUDA $_cuda_tag binaries (set BONSAI_CUDA_TAG to override)"
+            ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-12.8-x64.tar.gz"
+            DEST="bin/cuda"
+            info "Non-interactive environment — CUDA 12.8 → bin/cuda (set BONSAI_CUDA_TAG or BONSAI_LINUX_GPU=rocm to override)"
         fi
-
-        ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-${_cuda_tag}-x64.tar.gz"
-        DEST="bin/cuda"
         ;;
     *)
         err "Unsupported OS: $OS. Use setup.ps1 on Windows."

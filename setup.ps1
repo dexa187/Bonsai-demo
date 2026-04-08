@@ -7,7 +7,8 @@ $PythonVersion = "3.11"
 $VenvDir = Join-Path $PSScriptRoot ".venv"
 $VenvPy  = Join-Path $VenvDir "Scripts\python.exe"
 
-$ReleaseTag = "prism-b8196-f5dda72"
+$ReleaseTag = "prism-b8201-ba7e817"
+$WinAssetTag = "prism-b1-ba7e817"                    # Windows builds use shortened tag
 $BaseUrl = "https://github.com/PrismML-Eng/llama.cpp/releases/download/$ReleaseTag"
 
 $BonsaiModel = if ($env:BONSAI_MODEL) { $env:BONSAI_MODEL } else { "8B" }
@@ -133,7 +134,8 @@ Write-Host "==> Installing Python dependencies ..." -ForegroundColor Cyan
 uv pip install --python $VenvPy huggingface-hub
 Write-Host "[OK] Dependencies installed." -ForegroundColor Green
 
-# ── 6. Detect GPU / CUDA version ──
+# ── 6. Detect GPU: NVIDIA (CUDA) or AMD (HIP) ──
+$GpuType = $null
 $CudaTag = "12.4"
 $NvidiaSmi = $null
 foreach ($p in @(
@@ -149,15 +151,37 @@ foreach ($p in @(
                 if ($major -ge 13)                    { $CudaTag = "13.1" }
                 elseif ($major -eq 12 -and $minor -ge 4) { $CudaTag = "12.4" }
                 $NvidiaSmi = $p
+                $GpuType = "cuda"
                 break
             }
         } catch {}
     }
 }
-if ($NvidiaSmi) {
+if ($GpuType -eq "cuda") {
     Write-Host "[OK] NVIDIA GPU detected (CUDA $CudaTag)" -ForegroundColor Green
 } else {
-    Write-Host "[WARN] No NVIDIA GPU detected. Binaries require a CUDA-capable GPU." -ForegroundColor Yellow
+    # Check for AMD HIP SDK
+    $HipPath = if ($env:HIP_PATH) { $env:HIP_PATH } else { $null }
+    if (-not $HipPath) {
+        # Check common install locations
+        foreach ($candidate in @(
+            "$env:ProgramFiles\AMD\ROCm\*\bin\hipcc.exe",
+            "$env:ProgramFiles\AMD\ROCm\bin\hipcc.exe"
+        )) {
+            $found = Get-Item $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $HipPath = $found.DirectoryName; break }
+        }
+    }
+    if (-not $HipPath) {
+        $hipCmd = Get-Command hipcc -ErrorAction SilentlyContinue
+        if ($hipCmd) { $HipPath = Split-Path $hipCmd.Source }
+    }
+    if ($HipPath) {
+        $GpuType = "hip"
+        Write-Host "[OK] AMD GPU detected (HIP SDK at $HipPath)" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] No NVIDIA or AMD GPU detected. Binaries require a supported GPU." -ForegroundColor Yellow
+    }
 }
 
 # ── 7. Download GGUF model ──
@@ -185,38 +209,58 @@ if ($BonsaiModel -eq "all") {
     Download-GgufModel $BonsaiModel
 }
 
-# ── 8. Download pre-built CUDA binaries ──
+# ── 8. Download pre-built binaries (CUDA or HIP) ──
 Write-Host "==> Downloading llama.cpp binaries ..." -ForegroundColor Cyan
-$BinDir = Join-Path $PSScriptRoot "bin\cuda"
-if (Test-Path "$BinDir\llama-cli.exe") {
-    Write-Host "[OK] Binaries already present." -ForegroundColor Green
-} else {
-    $Asset = "llama-prism-b1-f5dda72-bin-win-cuda-${CudaTag}-x64.zip"
-    $Url = "$BaseUrl/$Asset"
-    $TmpZip = [System.IO.Path]::GetTempFileName() + ".zip"
+if ($GpuType -eq "hip") {
+    $BinDir = Join-Path $PSScriptRoot "bin\hip"
+    if (Test-Path "$BinDir\llama-cli.exe") {
+        Write-Host "[OK] Binaries already present." -ForegroundColor Green
+    } else {
+        $Asset = "llama-bin-win-hip-radeon-x64.zip"
+        $Url = "$BaseUrl/$Asset"
+        $TmpZip = [System.IO.Path]::GetTempFileName() + ".zip"
 
-    Write-Host "    Downloading $Asset ..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $Url -OutFile $TmpZip -UseBasicParsing
+        Write-Host "    Downloading $Asset ..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $Url -OutFile $TmpZip -UseBasicParsing
 
-    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-    Expand-Archive -Path $TmpZip -DestinationPath $BinDir -Force
-    Remove-Item $TmpZip -Force
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+        Expand-Archive -Path $TmpZip -DestinationPath $BinDir -Force
+        Remove-Item $TmpZip -Force
 
-    # Also download CUDA runtime DLLs
-    $DllAsset = "cudart-llama-bin-win-cuda-${CudaTag}-x64.zip"
-    $DllUrl = "$BaseUrl/$DllAsset"
-    $DllZip = [System.IO.Path]::GetTempFileName() + ".zip"
-
-    Write-Host "    Downloading CUDA runtime DLLs ..." -ForegroundColor Cyan
-    try {
-        Invoke-WebRequest -Uri $DllUrl -OutFile $DllZip -UseBasicParsing
-        Expand-Archive -Path $DllZip -DestinationPath $BinDir -Force
-        Remove-Item $DllZip -Force
-    } catch {
-        Write-Host "[WARN] Could not download CUDA DLLs. You may need to install CUDA toolkit." -ForegroundColor Yellow
+        Write-Host "[OK] Binaries installed to $BinDir" -ForegroundColor Green
     }
+} else {
+    $BinDir = Join-Path $PSScriptRoot "bin\cuda"
+    if (Test-Path "$BinDir\llama-cli.exe") {
+        Write-Host "[OK] Binaries already present." -ForegroundColor Green
+    } else {
+        $Asset = "llama-${WinAssetTag}-bin-win-cuda-${CudaTag}-x64.zip"
+        $Url = "$BaseUrl/$Asset"
+        $TmpZip = [System.IO.Path]::GetTempFileName() + ".zip"
 
-    Write-Host "[OK] Binaries installed to $BinDir" -ForegroundColor Green
+        Write-Host "    Downloading $Asset ..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $Url -OutFile $TmpZip -UseBasicParsing
+
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+        Expand-Archive -Path $TmpZip -DestinationPath $BinDir -Force
+        Remove-Item $TmpZip -Force
+
+        # Also download CUDA runtime DLLs
+        $DllAsset = "cudart-llama-bin-win-cuda-${CudaTag}-x64.zip"
+        $DllUrl = "$BaseUrl/$DllAsset"
+        $DllZip = [System.IO.Path]::GetTempFileName() + ".zip"
+
+        Write-Host "    Downloading CUDA runtime DLLs ..." -ForegroundColor Cyan
+        try {
+            Invoke-WebRequest -Uri $DllUrl -OutFile $DllZip -UseBasicParsing
+            Expand-Archive -Path $DllZip -DestinationPath $BinDir -Force
+            Remove-Item $DllZip -Force
+        } catch {
+            Write-Host "[WARN] Could not download CUDA DLLs. You may need to install CUDA toolkit." -ForegroundColor Yellow
+        }
+
+        Write-Host "[OK] Binaries installed to $BinDir" -ForegroundColor Green
+    }
 }
 
 # ── Done ──
