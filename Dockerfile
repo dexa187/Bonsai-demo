@@ -44,15 +44,16 @@ COPY . .
 ARG BONSAI_MODEL=8B
 ENV BONSAI_MODEL=${BONSAI_MODEL}
 
-ARG HF_TOKEN=
-ENV HF_TOKEN=${HF_TOKEN}
-
 RUN chmod +x /app/scripts/*.sh && \
     sh /app/scripts/download_binaries.sh
 
+# HF_TOKEN is only passed into the download step (not persisted in the final image ENV).
+# For private repos, prefer: docker build --secret id=hf_token,env=HF_TOKEN
+# and replace this RUN with a --mount=type=secret version if you need to avoid ARG.
+ARG HF_TOKEN=
 ARG SKIP_MODEL_DOWNLOAD=0
 RUN if [ "$SKIP_MODEL_DOWNLOAD" = "0" ]; then \
-      sh /app/scripts/download_models.sh; \
+      HF_TOKEN="${HF_TOKEN}" sh /app/scripts/download_models.sh; \
     else \
       echo "SKIP_MODEL_DOWNLOAD=1: expect models/ mounted or downloaded at runtime"; \
     fi

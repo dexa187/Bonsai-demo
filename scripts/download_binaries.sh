@@ -3,6 +3,10 @@
 # Auto-detects OS and CUDA version.
 #
 # Usage:  ./scripts/download_binaries.sh
+#
+# Linux + no detected CUDA: interactive prompt when stdin/stdout are TTYs;
+# otherwise defaults to CUDA 12.8 (Docker/CI). Override with:
+#   BONSAI_CUDA_TAG=12.4|12.8|13.1
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -40,19 +44,30 @@ case "$OS" in
                 _cuda_tag="12.4"
             fi
             info "Detected CUDA $_cuda_ver → using build for CUDA $_cuda_tag"
-        else
+        elif [ -n "${BONSAI_CUDA_TAG:-}" ]; then
+            case "$BONSAI_CUDA_TAG" in
+                12.4|12.8|13.1) _cuda_tag="$BONSAI_CUDA_TAG" ;;
+                *)
+                    err "BONSAI_CUDA_TAG must be 12.4, 12.8, or 13.1 (got: $BONSAI_CUDA_TAG)"
+                    exit 1 ;;
+            esac
+            info "Using CUDA $_cuda_tag (BONSAI_CUDA_TAG)"
+        elif [ -t 0 ] && [ -t 1 ]; then
             echo ""
             echo "  Available CUDA builds:"
             echo "    1) CUDA 12.4"
             echo "    2) CUDA 12.8"
             echo "    3) CUDA 13.1"
             printf "  Choose [1-3, default=2]: "
-            if [ -r /dev/tty ]; then read -r _choice </dev/tty; else read -r _choice; fi
+            read -r _choice
             case "$_choice" in
                 1) _cuda_tag="12.4" ;;
                 3) _cuda_tag="13.1" ;;
                 *) _cuda_tag="12.8" ;;
             esac
+        else
+            _cuda_tag="12.8"
+            info "Non-interactive environment — using CUDA $_cuda_tag binaries (set BONSAI_CUDA_TAG to override)"
         fi
 
         ASSET="llama-${RELEASE_TAG}-bin-linux-cuda-${_cuda_tag}-x64.tar.gz"
