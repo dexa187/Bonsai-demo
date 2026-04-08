@@ -82,15 +82,50 @@ else
     done
 
     if [ -n "$_model" ] && [ -n "$_bin" ]; then
-        step "Starting llama-server on port $LLAMA_PORT ..."
         _bin_dir="$(cd "$(dirname "$_bin")" && pwd)"
-        LD_LIBRARY_PATH="$_bin_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_bin" -m "$_model" --host 0.0.0.0 --port "$LLAMA_PORT" -ngl 99 -c "$CTX_SIZE_DEFAULT" \
-            --temp 0.5 --top-p 0.85 --top-k 20 --min-p 0 \
-            --reasoning-budget 0 --reasoning-format none \
-            --chat-template-kwargs '{"enable_thinking": false}' \
-            > /dev/null 2>&1 &
-        BG_PIDS="$BG_PIDS $!"
+        _internal="${BONSAI_LLAMA_INTERNAL_PORT:-18080}"
+        _sanitize="${BONSAI_OPENAI_SANITIZE:-1}"
+        _py=""
+        if [ -x "$DEMO_DIR/.venv/bin/python" ]; then
+            _py="$DEMO_DIR/.venv/bin/python"
+        elif command -v python3 >/dev/null 2>&1; then
+            _py="python3"
+        fi
+
+        if [ "$_sanitize" != "0" ] && [ -n "$_py" ] && ! curl -s --max-time 1 "http://127.0.0.1:$_internal/health" >/dev/null 2>&1; then
+            step "Starting llama-server + OpenAI sanitize proxy (public port $LLAMA_PORT) ..."
+            LD_LIBRARY_PATH="$_bin_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_bin" -m "$_model" --host 127.0.0.1 --port "$_internal" -ngl 99 -c "$CTX_SIZE_DEFAULT" \
+                --temp 0.5 --top-p 0.85 --top-k 20 --min-p 0 \
+                --reasoning-budget 0 --reasoning-format none \
+                --chat-template-kwargs '{"enable_thinking": false}' \
+                > /dev/null 2>&1 &
+            BG_PIDS="$BG_PIDS $!"
+            _tries=0
+            while [ "$_tries" -lt 45 ]; do
+                if curl -s --max-time 1 "http://127.0.0.1:$_internal/health" >/dev/null 2>&1; then
+                    break
+                fi
+                _tries=$((_tries + 1))
+                sleep 1
+            done
+            LD_LIBRARY_PATH="$_bin_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_py" "$SCRIPT_DIR/openai_chat_proxy.py" --host 0.0.0.0 --port "$LLAMA_PORT" \
+                --backend "http://127.0.0.1:$_internal" > /dev/null 2>&1 &
+            BG_PIDS="$BG_PIDS $!"
+        else
+            if [ "$_sanitize" != "0" ] && [ -z "$_py" ]; then
+                warn "Sanitizer proxy skipped (no python3); Open WebUI tool calls may error. Install Python or set BONSAI_OPENAI_SANITIZE=0."
+            fi
+            step "Starting llama-server on port $LLAMA_PORT ..."
+            LD_LIBRARY_PATH="$_bin_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_bin" -m "$_model" --host 0.0.0.0 --port "$LLAMA_PORT" -ngl 99 -c "$CTX_SIZE_DEFAULT" \
+                --temp 0.5 --top-p 0.85 --top-k 20 --min-p 0 \
+                --reasoning-budget 0 --reasoning-format none \
+                --chat-template-kwargs '{"enable_thinking": false}' \
+                > /dev/null 2>&1 &
+            BG_PIDS="$BG_PIDS $!"
+        fi
         # Wait for it to be ready
         _tries=0
         while [ "$_tries" -lt 30 ]; do
@@ -100,7 +135,7 @@ else
             _tries=$((_tries + 1))
             sleep 1
         done
-        info "llama-server started on port $LLAMA_PORT"
+        info "llama-server stack listening on port $LLAMA_PORT"
     else
         warn "Could not start llama-server (model or binary not found)."
     fi
